@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=iloader
+GenericName=iOS Sideloader
+Comment=User-friendly iOS sideloading companion
+Exec=iloader %u
+Icon=iloader
+Terminal=false
+Categories=Utility;Network;
+Keywords=iphone;ios;sideload;pairing;usbmuxd;
+StartupNotify=true
+StartupWMClass=iloader
+MimeType=x-scheme-handler/iloader;

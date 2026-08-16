@@ -1,0 +1,50 @@
+# Build + install-test: rewrap upstream RPM with Fedora spec
+name: iloader Fedora RPM build + install test
+on: workflow_dispatch
+env:
+  REPO_DEV: nab138
+  REPO_NAME: iloader
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - name: Checkout local
+        uses: actions/checkout@v6.0.2
+        with:
+          repository: ${{ github.repository }}
+      - name: Install dependencies
+        run: sudo dnf install -y -q git gawk jq curl rpm-build rpmdevtools cpio
+      - name: Get latest version
+        id: step_version
+        run: |
+          latest_release_tag=$(curl -fsSL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/$REPO_DEV/$REPO_NAME/releases/latest | jq -r '.tag_name // empty')
+          if [ -z "$latest_release_tag" ]; then echo "ERROR: tag empty"; exit 1; fi
+          version_no_v=$(echo "$latest_release_tag" | sed 's/^v//')
+          echo "VERSION_NO_V=$version_no_v" >> "$GITHUB_OUTPUT"
+      - name: Patch spec version
+        run: |
+          sed -i "s/^Version:.*/Version:        ${{ steps.step_version.outputs.VERSION_NO_V }}/" specs/iloader.spec
+          head -12 specs/iloader.spec
+      - name: Build RPM locally
+        run: |
+          rpmdev-setuptree
+          cp specs/iloader.spec $HOME/rpmbuild/SPECS/
+          cd $HOME/rpmbuild/SPECS
+          spectool -g -R iloader.spec
+          rpmbuild -ba iloader.spec 2>&1 | tail -15
+          ls -lh $HOME/rpmbuild/RPMS/x86_64/
+      - name: Inspect built RPM Requires
+        run: |
+          rpm_file=$(ls $HOME/rpmbuild/RPMS/x86_64/iloader-*.x86_64.rpm | grep -v debug | head -1)
+          echo "=== Built RPM: $rpm_file ==="
+          rpm -qpR "$rpm_file"
+          echo "REQUIRES_OUTPUT_END"
+      - name: Install-test the rebuilt RPM
+        run: |
+          rpm_file=$(ls $HOME/rpmbuild/RPMS/x86_64/iloader-*.x86_64.rpm | grep -v debug | head -1)
+          echo "=== Installing $rpm_file (expect usbmuxd + libs pulled) ==="
+          dnf in -y "$rpm_file" 2>&1 | tail -30
+          rpm -q iloader
+          rpm -V iloader
+          echo "### Install test passed :heavy_check_mark:" >> $GITHUB_STEP_SUMMARY

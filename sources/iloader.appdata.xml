@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>me.nabdev.iloader</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>iloader</name>
+  <summary>User-friendly iOS sideloading companion</summary>
+  <description>
+    <p>iloader is a user-friendly iOS sideloading companion. It lets you install
+    apps like SideStore and import your pairing file with ease, providing a
+    friendly front-end to isideload.</p>
+  </description>
+  <categories>
+    <category>Utility</category>
+    <category>Network</category>
+  </categories>
+  <url type="homepage">https://github.com/nab138/iloader</url>
+  <launchable type="desktop-id">iloader.desktop</launchable>
+  <provides>
+    <binary>iloader</binary>
+  </provides>
+  <releases>
+    <release version="2.3.1" date="2026-08-01"/>
+  </releases>
+</component>

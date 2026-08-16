@@ -1,0 +1,78 @@
+# Publish iloader prebuilt RPM to Fedora COPR
+name: iloader Fedora COPR CI
+on:
+  schedule:
+    - cron: "0 00 * * *"
+  workflow_dispatch:
+env:
+  COPR_PROJECT: iloader
+  COPR_USERNAME: anudeepd
+  COPR_URL: https://copr.fedorainfracloud.org
+  REPO_DEV: nab138
+  REPO_NAME: iloader
+jobs:
+  GetLatestVersion:
+    runs-on: ubuntu-latest
+    outputs:
+      VERSION: ${{ steps.step_version.outputs.VERSION }}
+    steps:
+      - name: Install jq
+        run: sudo apt-get update -y && sudo apt-get install -y jq
+      - name: Get latest version
+        id: step_version
+        run: |
+          latest_release_tag=$(curl -fsSL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/$REPO_DEV/$REPO_NAME/releases/latest | jq -r '.tag_name // empty')
+          if [ -z "$latest_release_tag" ]; then echo "ERROR: tag empty"; exit 1; fi
+          echo "VERSION=$latest_release_tag" >> "$GITHUB_OUTPUT"
+
+  UpdateFedoraCOPR:
+    needs: GetLatestVersion
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - name: Checkout local
+        uses: actions/checkout@v6.0.2
+        with:
+          repository: ${{ github.repository }}
+      - name: Install dependencies
+        run: sudo dnf install -y -q copr-cli python3 git gawk jq curl rpm-build cpio rpmdevtools
+      - name: Patch spec version
+        run: |
+          version_no_v=$(echo "${{ needs.GetLatestVersion.outputs.VERSION }}" | sed 's/^v//')
+          sed -i "s/^Version:.*/Version:        ${version_no_v}/" specs/iloader.spec
+          head -12 specs/iloader.spec
+      - name: Configure copr-cli
+        run: |
+          mkdir -p $HOME/.config
+          cat <<EOF > $HOME/.config/copr
+          [copr-cli]
+          login = ${{ secrets.COPR_BUILD_L }}
+          username = ${{ env.COPR_USERNAME }}
+          token = ${{ secrets.COPR_BUILD_T }}
+          copr_url = ${{ env.COPR_URL }}
+          EOF
+      - name: Decide whether to build
+        id: step_decide
+        run: |
+          set +e
+          LATEST_COPR=$(copr-cli get-package ${{ env.COPR_USERNAME }}/${{ env.COPR_PROJECT }} --name ${{ env.COPR_PROJECT }} 2>/dev/null | jq -r '.latest_build.source_package.version // empty')
+          set -e
+          NEW_TAG="${{ needs.GetLatestVersion.outputs.VERSION }}"
+          if [ -z "$LATEST_COPR" ]; then
+            echo "No COPR build yet — triggering first build"
+            echo "START_BUILD=true" >> "$GITHUB_ENV"
+          else
+            echo "Latest COPR = $LATEST_COPR ; new tag = $NEW_TAG"
+            copr_version=$(echo "$LATEST_COPR" | awk -F. '{printf "%03d%03d%03d\n", $1, $2, $3}')
+            git_version=$(echo "$NEW_TAG" | sed 's/^v//' | awk -F. '{printf "%03d%03d%03d\n", $1, $2, $3}')
+            if [ "$copr_version" \< "$git_version" ]; then
+              echo "START_BUILD=true" >> "$GITHUB_ENV"
+            else
+              echo "START_BUILD=false" >> "$GITHUB_ENV"
+            fi
+          fi
+      - name: Submit spec to COPR
+        if: env.START_BUILD == 'true'
+        run: |
+          echo "Submitting specs/iloader.spec to COPR"
+          copr-cli build ${{ env.COPR_PROJECT }} specs/iloader.spec
