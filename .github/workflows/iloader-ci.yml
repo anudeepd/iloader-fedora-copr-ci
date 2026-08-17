@@ -85,6 +85,13 @@ jobs:
           VERSION: ${{ needs.GetLatestVersion.outputs.VERSION }}
         run: |
           rpmdev-setuptree
+          # Force builds get a unique Release so we never collide with an
+          # existing NVR in COPR (duplicate NVRs desync repodata from the
+          # stored artifact and break dnf installs). The run ID makes every
+          # forced submission distinct, e.g. iloader-2.3.1-1.f32042503024.
+          if [ "${{ inputs.force_build }}" = "true" ]; then
+            sed -i "s/^Release:.*/Release: %{autorelease}.f${{ github.run_id }}/" specs/iloader.spec
+          fi
           # Always package the LICENSE for the exact version being built.
           # Fetch it from the release tag (authenticated, avoids raw rate
           # limits); fall back to the vendored copy if the fetch fails.
