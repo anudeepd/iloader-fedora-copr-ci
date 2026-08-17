@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "0 00 * * *"
   workflow_dispatch:
+    inputs:
+      force_build:
+        description: "Force a COPR rebuild even if the version is unchanged"
+        type: boolean
+        default: false
 env:
   COPR_PROJECT: iloader
   COPR_USERNAME: anudeepd
@@ -58,7 +63,10 @@ jobs:
           LATEST_COPR=$(copr-cli get-package ${{ env.COPR_USERNAME }}/${{ env.COPR_PROJECT }} --name ${{ env.COPR_PROJECT }} 2>/dev/null | jq -r '.latest_build.source_package.version // empty')
           set -e
           NEW_TAG="${{ needs.GetLatestVersion.outputs.VERSION }}"
-          if [ -z "$LATEST_COPR" ]; then
+          if [ "${{ inputs.force_build }}" = "true" ]; then
+            echo "Force rebuild requested (input force_build=true)"
+            echo "START_BUILD=true" >> "$GITHUB_ENV"
+          elif [ -z "$LATEST_COPR" ]; then
             echo "No COPR build yet — triggering first build"
             echo "START_BUILD=true" >> "$GITHUB_ENV"
           else
@@ -71,8 +79,24 @@ jobs:
               echo "START_BUILD=false" >> "$GITHUB_ENV"
             fi
           fi
-      - name: Submit spec to COPR
+      - name: Build SRPM and submit to COPR
         if: env.START_BUILD == 'true'
+        env:
+          VERSION: ${{ needs.GetLatestVersion.outputs.VERSION }}
         run: |
-          echo "Submitting specs/iloader.spec to COPR"
-          copr-cli build ${{ env.COPR_PROJECT }} specs/iloader.spec
+          rpmdev-setuptree
+          # Always package the LICENSE for the exact version being built.
+          # Fetch it from the release tag (authenticated, avoids raw rate
+          # limits); fall back to the vendored copy if the fetch fails.
+          curl -fsSL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.raw" \
+            "https://api.github.com/repos/$REPO_DEV/$REPO_NAME/contents/LICENSE?ref=$VERSION" \
+            -o $HOME/rpmbuild/SOURCES/LICENSE \
+            || cp sources/LICENSE $HOME/rpmbuild/SOURCES/
+          cp specs/iloader.spec $HOME/rpmbuild/SPECS/
+          cd $HOME/rpmbuild/SPECS
+          spectool -g -R iloader.spec
+          rpmbuild -bs iloader.spec
+          SRPM=$(ls $HOME/rpmbuild/SRPMS/iloader-*.src.rpm | head -1)
+          echo "Submitting $SRPM to COPR"
+          copr-cli build ${{ env.COPR_PROJECT }} "$SRPM"

@@ -29,6 +29,15 @@ jobs:
       - name: Build RPM locally
         run: |
           rpmdev-setuptree
+          VERSION_NO_V="${{ steps.step_version.outputs.VERSION_NO_V }}"
+          # Always package the LICENSE for the exact version being built.
+          # Fetch it from the release tag (authenticated, avoids raw rate
+          # limits); fall back to the vendored copy if the fetch fails.
+          curl -fsSL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.raw" \
+            "https://api.github.com/repos/$REPO_DEV/$REPO_NAME/contents/LICENSE?ref=v$VERSION_NO_V" \
+            -o $HOME/rpmbuild/SOURCES/LICENSE \
+            || cp sources/LICENSE $HOME/rpmbuild/SOURCES/
           cp specs/iloader.spec $HOME/rpmbuild/SPECS/
           cd $HOME/rpmbuild/SPECS
           spectool -g -R iloader.spec
