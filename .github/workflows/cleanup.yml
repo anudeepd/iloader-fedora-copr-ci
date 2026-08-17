@@ -1,0 +1,32 @@
+# Delete all but the most recent run for each iloader workflow
+name: Cleanup old workflow runs
+on:
+  schedule:
+    - cron: "30 0 * * *"
+  workflow_dispatch:
+permissions:
+  actions: write
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Keep only the latest run per workflow
+        run: |
+          for wf in iloader-ci.yml iloader-rpmbuild-test.yml cleanup.yml; do
+            echo "== $wf =="
+            ids=$(gh run list --repo "$REPO" --workflow "$wf" --limit 100 --json databaseId --jq '.[].databaseId')
+            total=$(printf '%s\n' "$ids" | grep -c .)
+            echo "found $total run(s)"
+            if [ "$total" -le 1 ]; then
+              echo "nothing to delete"
+              continue
+            fi
+            # gh run list is newest-first; keep the first, delete the rest
+            printf '%s\n' "$ids" | tail -n +2 | while read -r id; do
+              echo "deleting run $id"
+              gh run delete "$id" --repo "$REPO" || true
+            done
+          done
