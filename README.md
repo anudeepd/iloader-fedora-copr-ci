@@ -2,7 +2,7 @@
 
 [iloader](https://github.com/nab138/iloader) is a user-friendly iOS sideloading companion built with Tauri.
 
-Building from source for Fedora requires the Tauri toolchain (Rust + Bun). A GitHub Actions workflow is scheduled to run daily at 12AM to check the latest version released from https://github.com/nab138/iloader and publish it to COPR.
+This repo packages iloader for Fedora by rewrapping the upstream prebuilt Linux RPM with a Fedora spec. Currently x86_64 only, matching upstream's prebuilt release artifacts. A GitHub Actions workflow runs daily at 12AM UTC to check the latest release from https://github.com/nab138/iloader and publish it to COPR.
 
 The COPR project repository is available from: https://copr.fedorainfracloud.org/coprs/anudeepd/iloader
 
