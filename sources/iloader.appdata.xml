@@ -14,6 +14,10 @@
     <category>Utility</category>
     <category>Network</category>
   </categories>
+  <developer id="me.nabdev">
+    <name>nab138</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
   <url type="homepage">https://github.com/nab138/iloader</url>
   <launchable type="desktop-id">iloader.desktop</launchable>
   <provides>

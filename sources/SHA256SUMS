@@ -1,2 +1,5 @@
-e9c95dd6d0d5df43ae1767f1fd042ac137a1d7a070c3fd53338b5a80cd71795c  iloader.desktop
-86b2096c5cfcc2ca2ac5979771785868b996e53d303b9ace2cf30a43da888bf0  iloader.appdata.xml
+# SHA256SUMS for the upstream iloader release artifact (iloader-linux-x86_64.rpm).
+# Format: <sha256>  <version>
+# CI records each version's hash on first sight (trust-on-first-use) and fails
+# subsequent builds if the downloaded artifact does not match the recorded hash.
+444ed4365a760d59185762af756f2a5a49655cfd33e7d1bcbdb328ce37402eca  2.3.1

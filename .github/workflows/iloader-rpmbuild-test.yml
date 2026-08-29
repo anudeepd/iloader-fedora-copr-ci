@@ -7,14 +7,14 @@ env:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    container: fedora:latest
+    container: fedora:44
     steps:
       - name: Checkout local
         uses: actions/checkout@v6.0.2
         with:
           repository: ${{ github.repository }}
       - name: Install dependencies
-        run: sudo dnf install -y -q git gawk jq curl rpm-build rpmdevtools cpio
+        run: sudo dnf install -y -q git gawk jq curl rpm-build rpmdevtools cpio desktop-file-utils appstream rpmlint
       - name: Get latest version
         id: step_version
         run: |
@@ -22,22 +22,22 @@ jobs:
           if [ -z "$latest_release_tag" ]; then echo "ERROR: tag empty"; exit 1; fi
           version_no_v=$(echo "$latest_release_tag" | sed 's/^v//')
           echo "VERSION_NO_V=$version_no_v" >> "$GITHUB_OUTPUT"
-      - name: Patch spec version
+      - name: Patch spec and appdata version
         run: |
           sed -i "s/^Version:.*/Version:        ${{ steps.step_version.outputs.VERSION_NO_V }}/" specs/iloader.spec
+          sed -i "s|<release version=\"[^\"]*\" date=\"[^\"]*\"|<release version=\"${{ steps.step_version.outputs.VERSION_NO_V }}\" date=\"$(date +%F)\"|" sources/iloader.appdata.xml
           head -12 specs/iloader.spec
+      - name: Validate curated desktop and AppStream metadata
+        run: |
+          desktop-file-validate sources/iloader.desktop
+          appstreamcli validate --no-net sources/iloader.appdata.xml
       - name: Build RPM locally
         run: |
           rpmdev-setuptree
           VERSION_NO_V="${{ steps.step_version.outputs.VERSION_NO_V }}"
-          # Always package the LICENSE for the exact version being built.
-          # Fetch it from the release tag (authenticated, avoids raw rate
-          # limits); fall back to the vendored copy if the fetch fails.
-          curl -fsSL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.raw" \
-            "https://api.github.com/repos/$REPO_DEV/$REPO_NAME/contents/LICENSE?ref=v$VERSION_NO_V" \
-            -o $HOME/rpmbuild/SOURCES/LICENSE \
-            || cp sources/LICENSE $HOME/rpmbuild/SOURCES/
+          # spectool fetches LICENSE and LICENSE-BRANDING from the release tag
+          # (Source1/Source4 URLs). No fallback: a failed fetch fails the build.
+          cp sources/iloader.desktop sources/iloader.appdata.xml README.md $HOME/rpmbuild/SOURCES/
           cp specs/iloader.spec $HOME/rpmbuild/SPECS/
           cd $HOME/rpmbuild/SPECS
           spectool -g -R iloader.spec
@@ -49,6 +49,21 @@ jobs:
           echo "=== Built RPM: $rpm_file ==="
           rpm -qpR "$rpm_file"
           echo "REQUIRES_OUTPUT_END"
+      - name: Validate packaged desktop and AppStream metadata
+        run: |
+          rpm_file=$(ls $HOME/rpmbuild/RPMS/x86_64/iloader-*.x86_64.rpm | grep -v debug | head -1)
+          rm -rf /tmp/rpmbuild-check
+          mkdir -p /tmp/rpmbuild-check
+          cd /tmp/rpmbuild-check
+          rpm2cpio "$rpm_file" | cpio -idmu --quiet
+          desktop-file-validate usr/share/applications/iloader.desktop
+          appstreamcli validate --no-net usr/share/metainfo/me.nabdev.iloader.metainfo.xml
+      - name: Run rpmlint
+        run: |
+          rpm_file=$(ls $HOME/rpmbuild/RPMS/x86_64/iloader-*.x86_64.rpm | grep -v debug | head -1)
+          # Only the no-manual-page warning remains (no upstream man page);
+          # spelling and unstripped-binary are filtered via rpmlintrc.
+          rpmlint -r "$GITHUB_WORKSPACE/rpmlintrc" "$rpm_file"
       - name: Install-test the rebuilt RPM
         run: |
           rpm_file=$(ls $HOME/rpmbuild/RPMS/x86_64/iloader-*.x86_64.rpm | grep -v debug | head -1)

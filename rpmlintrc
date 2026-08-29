@@ -1,0 +1,7 @@
+# "sideloading" and "isideload" are the project's own terms (upstream
+# description and product name); rpmlint's dictionary has no entry for them.
+addFilter("spelling-error .*sideloading")
+addFilter("spelling-error .*isideload")
+# The prebuilt upstream binary carries .symtab (unstripped) by design; see the
+# rationale next to %global debug_package %{nil} in specs/iloader.spec.
+addFilter("unstripped-binary-or-object")

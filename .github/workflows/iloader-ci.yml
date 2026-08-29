@@ -9,6 +9,8 @@ on:
         description: "Force a COPR rebuild even if the version is unchanged"
         type: boolean
         default: false
+permissions:
+  contents: write
 env:
   COPR_PROJECT: iloader
   COPR_USERNAME: anudeepd
@@ -33,19 +35,24 @@ jobs:
   UpdateFedoraCOPR:
     needs: GetLatestVersion
     runs-on: ubuntu-latest
-    container: fedora:latest
+    container: fedora:44
     steps:
       - name: Checkout local
         uses: actions/checkout@v6.0.2
         with:
           repository: ${{ github.repository }}
       - name: Install dependencies
-        run: sudo dnf install -y -q copr-cli python3 git gawk jq curl rpm-build cpio rpmdevtools
-      - name: Patch spec version
+        run: sudo dnf install -y -q copr-cli python3 git gawk jq curl rpm-build cpio rpmdevtools desktop-file-utils appstream
+      - name: Patch spec and appdata version
         run: |
           version_no_v=$(echo "${{ needs.GetLatestVersion.outputs.VERSION }}" | sed 's/^v//')
           sed -i "s/^Version:.*/Version:        ${version_no_v}/" specs/iloader.spec
+          sed -i "s|<release version=\"[^\"]*\" date=\"[^\"]*\"|<release version=\"${version_no_v}\" date=\"$(date +%F)\"|" sources/iloader.appdata.xml
           head -12 specs/iloader.spec
+      - name: Validate curated desktop and AppStream metadata
+        run: |
+          desktop-file-validate sources/iloader.desktop
+          appstreamcli validate --no-net sources/iloader.appdata.xml
       - name: Configure copr-cli
         run: |
           mkdir -p $HOME/.config
@@ -60,20 +67,37 @@ jobs:
         id: step_decide
         run: |
           set +e
-          LATEST_COPR=$(copr-cli get-package ${{ env.COPR_USERNAME }}/${{ env.COPR_PROJECT }} --name ${{ env.COPR_PROJECT }} 2>/dev/null | jq -r '.latest_build.source_package.version // empty')
+          response=$(curl -fsS -w '\n%{http_code}' \
+            "https://copr.fedorainfracloud.org/api_3/build/list?ownername=${{ env.COPR_USERNAME }}&projectname=${{ env.COPR_PROJECT }}&packagename=iloader")
+          rc=$?
           set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "ERROR: COPR API query failed (curl rc=$rc)"
+            exit 1
+          fi
+          http_code=$(printf '%s\n' "$response" | tail -1)
+          body=$(printf '%s\n' "$response" | sed '$d')
+          if [ "$http_code" != "200" ]; then
+            echo "ERROR: COPR API returned HTTP $http_code"
+            exit 1
+          fi
+          LATEST_COPR=$(printf '%s\n' "$body" | jq -r '[.items | sort_by(.id) | reverse[] | select(.state == "succeeded") | .source_package.version] | first // empty')
           NEW_TAG="${{ needs.GetLatestVersion.outputs.VERSION }}"
           if [ "${{ inputs.force_build }}" = "true" ]; then
             echo "Force rebuild requested (input force_build=true)"
             echo "START_BUILD=true" >> "$GITHUB_ENV"
           elif [ -z "$LATEST_COPR" ]; then
-            echo "No COPR build yet — triggering first build"
+            echo "No succeeded COPR build yet — triggering first build"
             echo "START_BUILD=true" >> "$GITHUB_ENV"
           else
             echo "Latest COPR = $LATEST_COPR ; new tag = $NEW_TAG"
-            copr_version=$(echo "$LATEST_COPR" | awk -F. '{printf "%03d%03d%03d\n", $1, $2, $3}')
-            git_version=$(echo "$NEW_TAG" | sed 's/^v//' | awk -F. '{printf "%03d%03d%03d\n", $1, $2, $3}')
-            if [ "$copr_version" \< "$git_version" ]; then
+            git_version=$(echo "$NEW_TAG" | sed 's/^v//')
+            set +e
+            rpmdev-vercmp "$LATEST_COPR" "$git_version"
+            rc=$?
+            set -e
+            # rpmdev-vercmp: 0 = equal, 11 = first newer, 12 = second newer
+            if [ "$rc" -eq 12 ]; then
               echo "START_BUILD=true" >> "$GITHUB_ENV"
             else
               echo "START_BUILD=false" >> "$GITHUB_ENV"
@@ -85,6 +109,7 @@ jobs:
           VERSION: ${{ needs.GetLatestVersion.outputs.VERSION }}
         run: |
           rpmdev-setuptree
+          VERSION_NO_V=$(echo "$VERSION" | sed 's/^v//')
           # Force builds get a unique Release so we never collide with an
           # existing NVR in COPR (duplicate NVRs desync repodata from the
           # stored artifact and break dnf installs). The run ID makes every
@@ -92,18 +117,42 @@ jobs:
           if [ "${{ inputs.force_build }}" = "true" ]; then
             sed -i "s/^Release:.*/Release: %{autorelease}.f${{ github.run_id }}/" specs/iloader.spec
           fi
-          # Always package the LICENSE for the exact version being built.
-          # Fetch it from the release tag (authenticated, avoids raw rate
-          # limits); fall back to the vendored copy if the fetch fails.
-          curl -fsSL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.raw" \
-            "https://api.github.com/repos/$REPO_DEV/$REPO_NAME/contents/LICENSE?ref=$VERSION" \
-            -o $HOME/rpmbuild/SOURCES/LICENSE \
-            || cp sources/LICENSE $HOME/rpmbuild/SOURCES/
+          # spectool fetches LICENSE and LICENSE-BRANDING from the release tag
+          # (Source1/Source4 URLs). No fallback: a failed fetch fails the build
+          # so the packaged license always matches the version being built.
+          cp sources/iloader.desktop sources/iloader.appdata.xml README.md $HOME/rpmbuild/SOURCES/
           cp specs/iloader.spec $HOME/rpmbuild/SPECS/
           cd $HOME/rpmbuild/SPECS
           spectool -g -R iloader.spec
+          # Integrity check: the downloaded RPM must match the hash recorded
+          # in sources/SHA256SUMS. First sighting of a new version records the
+          # hash (trust-on-first-use) and commits it back to the repo.
+          HASH=$(sha256sum $HOME/rpmbuild/SOURCES/iloader-linux-x86_64.rpm | awk '{print $1}')
+          EXPECTED=$(awk -v v="$VERSION_NO_V" '$2==v {print $1}' "$GITHUB_WORKSPACE/sources/SHA256SUMS")
+          if [ -n "$EXPECTED" ]; then
+            if [ "$EXPECTED" != "$HASH" ]; then
+              echo "ERROR: checksum mismatch for iloader $VERSION_NO_V"
+              echo "expected: $EXPECTED"
+              echo "actual:   $HASH"
+              exit 1
+            fi
+            echo "Checksum OK for $VERSION_NO_V"
+          else
+            echo "No recorded checksum for $VERSION_NO_V — recording (trust-on-first-use)"
+            cd "$GITHUB_WORKSPACE"
+            # Keep header comments and cap recorded entries to the latest 3 versions
+            header=$(grep '^#' sources/SHA256SUMS || true)
+            entries=$(grep -v '^#' sources/SHA256SUMS | grep -v '^$' || true)
+            new_entries=$(printf '%s\n%s  %s\n' "$entries" "$HASH" "$VERSION_NO_V" | grep -v '^$' | tail -n 3)
+            printf '%s\n\n%s\n' "$header" "$new_entries" > sources/SHA256SUMS
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add sources/SHA256SUMS
+            git commit -m "ci: record checksum for iloader $VERSION_NO_V"
+            git pull --rebase origin "$(git branch --show-current)" || true
+            git push
+          fi
           rpmbuild -bs iloader.spec
           SRPM=$(ls $HOME/rpmbuild/SRPMS/iloader-*.src.rpm | head -1)
           echo "Submitting $SRPM to COPR"
-          copr-cli build ${{ env.COPR_PROJECT }} "$SRPM"
+          copr-cli build --nowait ${{ env.COPR_PROJECT }} "$SRPM"
