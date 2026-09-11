@@ -162,18 +162,22 @@ jobs:
             echo "Checksum OK for $VERSION_NO_V"
           else
             echo "No recorded checksum for $VERSION_NO_V — recording (trust-on-first-use)"
-            cd "$GITHUB_WORKSPACE"
+            # All git work happens via -C: rpmbuild below needs the cwd to stay
+            # in $HOME/rpmbuild/SPECS.
+            WS="$GITHUB_WORKSPACE"
             # Keep header comments and cap recorded entries to the latest 3 versions
-            header=$(grep '^#' sources/SHA256SUMS || true)
-            entries=$(grep -v '^#' sources/SHA256SUMS | grep -v '^$' || true)
+            header=$(grep '^#' "$WS/sources/SHA256SUMS" || true)
+            entries=$(grep -v '^#' "$WS/sources/SHA256SUMS" | grep -v '^$' || true)
             new_entries=$(printf '%s\n%s  %s\n' "$entries" "$HASH" "$VERSION_NO_V" | grep -v '^$' | tail -n 3)
-            printf '%s\n\n%s\n' "$header" "$new_entries" > sources/SHA256SUMS
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add sources/SHA256SUMS
-            git commit -m "ci: record checksum for iloader $VERSION_NO_V"
-            git pull --rebase origin "$(git branch --show-current)" || true
-            git push
+            printf '%s\n\n%s\n' "$header" "$new_entries" > "$WS/sources/SHA256SUMS"
+            git -C "$WS" config user.name "github-actions[bot]"
+            git -C "$WS" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git -C "$WS" add sources/SHA256SUMS
+            git -C "$WS" commit -m "ci: record checksum for iloader $VERSION_NO_V"
+            # The version patch earlier in this job leaves spec/appdata dirty, so
+            # the rebase needs --autostash to keep the fast-forward push valid.
+            git -C "$WS" pull --rebase --autostash origin "$(git -C "$WS" branch --show-current)" || true
+            git -C "$WS" push
           fi
           rpmbuild -bs iloader.spec
           SRPM=$(ls $HOME/rpmbuild/SRPMS/iloader-*.src.rpm | head -1)
