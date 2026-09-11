@@ -37,6 +37,11 @@ jobs:
     runs-on: ubuntu-latest
     container: fedora:44
     steps:
+      # fedora:44 ships no git. Without it actions/checkout silently falls back
+      # to downloading a source tarball, so the workspace has no .git and the
+      # checksum commit/push below dies with "fatal: not in a git directory".
+      - name: Install git
+        run: sudo dnf install -y -q git
       - name: Checkout local
         uses: actions/checkout@v6.0.2
         with:
