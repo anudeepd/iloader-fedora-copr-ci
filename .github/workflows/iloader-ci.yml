@@ -38,14 +38,20 @@ jobs:
     container: fedora:44
     steps:
       # fedora:44 ships no git. Without it actions/checkout silently falls back
-      # to downloading a source tarball, so the workspace has no .git and the
-      # checksum commit/push below dies with "fatal: not in a git directory".
+      # to downloading a source tarball, leaving no .git for the checksum
+      # commit/push below.
       - name: Install git
         run: sudo dnf install -y -q git
       - name: Checkout local
         uses: actions/checkout@v6.0.2
         with:
           repository: ${{ github.repository }}
+      # Steps run as root inside the container while the bind-mounted workspace
+      # is owned by the runner user (uid 1001), so git rejects the repository as
+      # dubiously owned. actions/checkout only records safe.directory in a
+      # temporary global config that it reverts, so set it for the commit/push.
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Install dependencies
         run: sudo dnf install -y -q copr-cli python3 git gawk jq curl rpm-build cpio rpmdevtools desktop-file-utils appstream
       - name: Patch spec and appdata version
