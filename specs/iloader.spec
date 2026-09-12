@@ -1,7 +1,28 @@
-# Prebuilt foreign binary: no build-id or debuginfo can be produced, and
-# disabling the debug package also skips brp-strip, which would otherwise
-# rewrite the upstream blob. The binary ships as-is from the release RPM.
+# Prebuilt foreign binary: no build-id or debuginfo can be produced, so the
+# debug package is disabled. The binary ships as-is from the release RPM.
 %global debug_package %{nil}
+
+# NOTE (verified by local rpmbuild of 2.3.1): %%global debug_package %%{nil}
+# is what makes the default ELF-rewriting brp hooks run, not what skips them
+# — Fedora's %%__os_install_post gates brp-strip / brp-strip-comment-note on
+# %%__debug_package being *undefined*. With them in place the payload's ELF
+# files get rewritten: brp-strip dropped .symtab/.strtab from
+# /usr/bin/iloader (35659024 -> 34534016 bytes) instead of shipping it as
+# upstream built it. brp-strip-lto and brp-strip-static-archive are not
+# gated at all. Empty all four so the only remaining difference from the
+# upstream RPM is the intended curated desktop file. Set them to %%{nil}
+# rather than %%undefine'ing them: with rpm 6.0.2 %%undefine does not mask
+# brp-strip / brp-strip-comment-note (verified — the hooks still ran, while
+# %%undefine on the lto one did take effect).
+%global __brp_strip %{nil}
+%global __brp_strip_comment_note %{nil}
+%global __brp_strip_lto %{nil}
+%global __brp_strip_static_archive %{nil}
+
+# add-determinism's brp hook (add-det) would regenerate /usr/lib/.build-id
+# links from the payload's ELF build-id notes and otherwise normalize the
+# payload. The payload must ship as upstream built it, so unset the hook.
+%undefine __brp_add_determinism
 
 Name:           iloader
 Version:        2.3.1
@@ -76,6 +97,12 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/me.nabdev.iloader.met
 # %%changelog entry — Release bumps automatically and the NVR stays unique.
 
 %changelog
+* Sat Sep 12 2026 Anudeep D <anudeepd2@gmail.com> - 2.3.1-4
+- Keep the payload matching upstream outside the curated desktop file: unset
+  Fedora's ELF-rewriting brp hooks (brp-strip, brp-strip-comment-note,
+  brp-strip-lto, brp-strip-static-archive) which drop .comment from every
+  bundled binary
+
 * Sat Aug 29 2026 Anudeep D <anudeepd2@gmail.com> - 2.3.1-3
 - Fix CI version gating, rpmlint warnings, and licensing provenance
 - Ship LICENSE-BRANDING, AppStream metadata, curated desktop file, and %doc README

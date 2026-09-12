@@ -53,6 +53,29 @@ jobs:
           spectool -g -R iloader.spec
           rpmbuild -ba iloader.spec 2>&1 | tail -15
           ls -lh $HOME/rpmbuild/RPMS/x86_64/
+      - name: Verify the payload matches upstream except the curated desktop file
+        run: |
+          # The contract is that the RPM payload ships as upstream built it, the
+          # only intended delta being the curated desktop file installed over
+          # upstream's. Fedora's default brp hooks rewrite any ELF they see, so
+          # without this check a silent macro change would only show up as a
+          # quietly different binary.
+          upstream=$(ls $HOME/rpmbuild/SOURCES/iloader-linux-x86_64.rpm | head -1)
+          built=$(ls $HOME/rpmbuild/RPMS/x86_64/iloader-*.rpm | grep -v debug | head -1)
+          rm -rf /tmp/payload-upstream /tmp/payload-built
+          mkdir -p /tmp/payload-upstream /tmp/payload-built
+          (cd /tmp/payload-upstream && rpm2cpio "$upstream" | cpio -idm --quiet)
+          (cd /tmp/payload-built && rpm2cpio "$built" | cpio -idm --quiet)
+          # Only the curated desktop file may differ in content. The path is
+          # matched unanchored: diff prints "Files A and B differ", so the
+          # path is never at end of line.
+          drift=$(diff -rq /tmp/payload-upstream /tmp/payload-built 2>&1 | grep ' differ$' | grep -vE '/usr/share/applications/iloader\.desktop( |$)' || true)
+          if [ -n "$drift" ]; then
+            echo "ERROR: payload drifted from upstream:"
+            printf '%s\n' "$drift"
+            exit 1
+          fi
+          echo "### Payload matches upstream except the curated desktop file :heavy_check_mark:" >> $GITHUB_STEP_SUMMARY
       - name: Inspect built RPM Requires
         run: |
           rpm_file=$(ls $HOME/rpmbuild/RPMS/x86_64/iloader-*.x86_64.rpm | grep -v debug | head -1)

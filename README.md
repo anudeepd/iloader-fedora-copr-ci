@@ -31,8 +31,16 @@ Everything else follows the guidelines:
   `LICENSE-BRANDING` notice.
 - `%{_bindir}`, `%{_datadir}`, `%{_metainfodir}` macros used in `%files`.
 - `%global debug_package %{nil}` with an explicit rationale: the prebuilt
-  foreign binary cannot produce debuginfo, and disabling the debug package
-  also skips `brp-strip`, which would otherwise rewrite the upstream blob.
+  foreign binary cannot produce debuginfo, so the debug package is meaningless
+  for a rewrap. Note that this is what *enables* Fedora's ELF-rewriting brp
+  hooks rather than skipping them: `%__os_install_post` gates `brp-strip` and
+  `brp-strip-comment-note` on `%__debug_package` being undefined, and with
+  them active the payload's ELF files get rewritten (verified: brp-strip
+  dropped `.symtab`/`.strtab` from `/usr/bin/iloader`).
+  `brp-strip-lto` and `brp-strip-static-archive` are not gated at all. All
+  four hooks plus `add-det` are emptied in the spec, so the only remaining
+  difference from the upstream RPM is the curated desktop file below — and
+  the RPM build test workflow checks exactly that.
 - Runtime deps (`usbmuxd`, `hicolor-icon-theme`) declared explicitly; library
   deps auto-detected from `DT_NEEDED`. No network access inside the buildroot.
 - The downloaded RPM is verified against a recorded SHA256 checksum before
