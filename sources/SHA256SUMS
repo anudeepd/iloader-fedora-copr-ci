@@ -3,6 +3,6 @@
 # CI records each version's hash on first sight (trust-on-first-use) and fails
 # subsequent builds if the downloaded artifact does not match the recorded hash.
 
-e046d3dcfdf2b8fe3db8dd4042ed45f85098f8858a3ae801541a2d932e56906c  2.3.5
 caa5525ce41cf785685c6cfa987254c29b4aa675369d3ae455b015126aa749b9  2.3.6
 374435ade94573c2c1431ba8ad1c6eb94db48f18f63728df2b193bc1dbedc0b0  2.3.7
+c18406fa6628bcef31fe82b43fe8c7904fbff91d3795816cdaebca23849e931e  2.3.8
